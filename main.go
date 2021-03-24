@@ -23,7 +23,8 @@ func main() {
 
 	r := flag.Bool("r", false, "visit folders recursively")
 	h := flag.Bool("h", false, "print help")
-	w := flag.Bool("w", false, "actually write")
+	w := flag.Bool("w", false, "actually write \\r\\n to \\n changes")
+	v := flag.Bool("v", false, "verbose")
 	flag.Parse()
 	if *h || len(flag.Args()) == 0 {
 		name := filepath.Base(os.Args[0])
@@ -31,8 +32,8 @@ func main() {
 
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "%[1]s <filePattern(s)>       report only in the current folder.\n", name)
-		fmt.Fprintf(flag.CommandLine.Output(), "%[1]s -r <filePattern(s)>    report only in the current folder and recursivly.\n", name)
-		fmt.Fprintf(flag.CommandLine.Output(), "%[1]s -w -r <filePattern(s)> replace in the current folder and recursivly.\n", name)
+		fmt.Fprintf(flag.CommandLine.Output(), "%[1]s -r <filePattern(s)>    report only in the current folder and recursively.\n", name)
+		fmt.Fprintf(flag.CommandLine.Output(), "%[1]s -w -r <filePattern(s)> replace in the current folder and recursively.\n", name)
 		flag.PrintDefaults()
 		fmt.Fprintf(flag.CommandLine.Output(), "  <filePattern(s)>    file pattern or space-separated list of file patterns, ex. *.tmpl\n")
 		os.Exit(0)
@@ -81,7 +82,7 @@ func main() {
 
 			}
 			if process {
-				err := processFile(ctx, path, d, *w)
+				err := processFile(ctx, path, d, *w, *v)
 				if err != nil {
 					fmt.Println("-", err)
 				}
@@ -91,7 +92,7 @@ func main() {
 	})
 }
 
-func processFile(ctx context.Context, path string, d fs.DirEntry, write bool) error {
+func processFile(ctx context.Context, path string, d fs.DirEntry, write bool, verbose bool) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("error opening %v: %v", path, err)
@@ -118,30 +119,29 @@ func processFile(ctx context.Context, path string, d fs.DirEntry, write bool) er
 		return fmt.Errorf("can't seek the file: %v", err)
 	}
 
-	scanner := bufio.NewScanner(file)
-	scanner.Split(scan.ScanLinesKeep)
-
-	diff := false
-	for scanner.Scan() {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	if strings.HasPrefix(typeDetected, "text/") {
+		scanner := bufio.NewScanner(file)
+		scanner.Split(scan.ScanLinesKeep)
+		diff := false
+		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			line := scanner.Text()
+			if strings.HasSuffix(line, "\r\n") {
+				diff = true
+				line = strings.Replace(line, "\r\n", "\n", 1)
+			}
+			_, err := temp.WriteString(strings.Replace(line, "\r\n", "\n", 1))
+			if err != nil {
+				return fmt.Errorf("error writing to temp file %v", err)
+			}
 		}
-		line := scanner.Text()
-		if strings.HasSuffix(line, "\r\n") {
-			diff = true
-			line = strings.Replace(line, "\r\n", "\n", 1)
-		}
-		_, err := temp.WriteString(strings.Replace(line, "\r\n", "\n", 1))
-		if err != nil {
-			return fmt.Errorf("error writing to temp file %v", err)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading %v: %v", path, err)
-	} else {
-		if strings.HasPrefix(typeDetected, "text/") {
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("error reading %v: %v", path, err)
+		} else {
 			if diff {
 				if write {
 					err = file.Close()
@@ -163,15 +163,12 @@ func processFile(ctx context.Context, path string, d fs.DirEntry, write bool) er
 					if err = temp.Close(); err != nil {
 						return fmt.Errorf("can't close temp file: %v", err)
 					}
-
 					source, err := os.Open(temp.Name())
 					if err != nil {
 						return fmt.Errorf("error creating fresh file: %v", err)
 					}
 					defer source.Close()
-
 					writer := bufio.NewWriter(destination)
-
 					if _, err = io.Copy(writer, source); err != nil {
 						return fmt.Errorf("error writing to destination file: %v", err)
 					}
@@ -185,7 +182,9 @@ func processFile(ctx context.Context, path string, d fs.DirEntry, write bool) er
 			} else {
 				//fmt.Printf("nothing to change: %v\n", path)
 			}
-		} else {
+		}
+	} else {
+		if verbose {
 			fmt.Printf("- wrong file type:   %v (%v)\n", path, typeDetected)
 		}
 	}

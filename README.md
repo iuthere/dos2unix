@@ -20,11 +20,12 @@ Requirement: `Go 1.16`.
 > dos2unix
 Usage:
 dos2unix <filePattern(s)>       report only in the current folder.
-dos2unix -r <filePattern(s)>    report only in the current folder and recursivly.
-dos2unix -w -r <filePattern(s)> replace in the current folder and recursivly.
+dos2unix -r <filePattern(s)>    report only in the current folder and recursively.
+dos2unix -w -r <filePattern(s)> replace in the current folder and recursively.
   -h    print help
   -r    visit folders recursively
-  -w    actually write
+  -v    verbose
+  -w    actually write \r\n to \n changes
   <filePattern(s)>    file pattern or space-separated list of file patterns, ex. *.tmpl
 ```
 
