@@ -94,7 +94,7 @@ func main() {
 func processFile(ctx context.Context, path string, d fs.DirEntry, write bool) error {
 	file, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("error opening %v: %v\n", path, err)
+		return fmt.Errorf("error opening %v: %v", path, err)
 	}
 	defer file.Close()
 
@@ -135,22 +135,22 @@ func processFile(ctx context.Context, path string, d fs.DirEntry, write bool) er
 		}
 		_, err := temp.WriteString(strings.Replace(line, "\r\n", "\n", 1))
 		if err != nil {
-			return fmt.Errorf("error writing to temp file %v\n", err)
+			return fmt.Errorf("error writing to temp file %v", err)
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading %v: %v\n", path, err)
+		return fmt.Errorf("error reading %v: %v", path, err)
 	} else {
 		if strings.HasPrefix(typeDetected, "text/") {
 			if diff {
 				if write {
 					err = file.Close()
 					if err != nil {
-						return fmt.Errorf("can't close original file: %v\n", err)
+						return fmt.Errorf("can't close original file: %v", err)
 					}
 					destination, err := os.Create(path)
 					if err != nil {
-						return fmt.Errorf("error opening %v: %v\n", path, err)
+						return fmt.Errorf("error opening %v: %v", path, err)
 					}
 					defer func() {
 						destination.Sync()
@@ -158,25 +158,25 @@ func processFile(ctx context.Context, path string, d fs.DirEntry, write bool) er
 					}()
 
 					if err = temp.Sync(); err != nil {
-						return fmt.Errorf("can't sync to temp file: %v\n", err)
+						return fmt.Errorf("can't sync to temp file: %v", err)
 					}
 					if err = temp.Close(); err != nil {
-						return fmt.Errorf("can't close temp file: %v\n", err)
+						return fmt.Errorf("can't close temp file: %v", err)
 					}
 
 					source, err := os.Open(temp.Name())
 					if err != nil {
-						return fmt.Errorf("error creating fresh file: %v\n", err)
+						return fmt.Errorf("error creating fresh file: %v", err)
 					}
 					defer source.Close()
 
 					writer := bufio.NewWriter(destination)
 
 					if _, err = io.Copy(writer, source); err != nil {
-						return fmt.Errorf("error writing to destination file: %v\n", err)
+						return fmt.Errorf("error writing to destination file: %v", err)
 					}
 					if err = writer.Flush(); err != nil {
-						return fmt.Errorf("error flushing to destination file: %v\n", err)
+						return fmt.Errorf("error flushing to destination file: %v", err)
 					}
 					fmt.Printf("+ removed \\r\\n:      %v\n", path)
 				} else {
