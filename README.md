@@ -1,3 +1,5 @@
+[![github.com/iuthere/dos2unix](./doc/gobadge.svg)](https://pkg.go.dev/github.com/iuthere/dos2unix)
+
 # dos2unix
 
 Converts text files with \r\n line endings into \n. Gracefully interrupts upon Ctrl+C.
