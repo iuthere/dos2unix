@@ -17,49 +17,34 @@ import (
 	"strings"
 )
 
+type config struct {
+	recursive bool
+	write     bool
+	verbose   bool
+}
+
+func skipDir(name string) bool {
+	switch name {
+	case ".git", ".idea", ".vscode":
+		return true
+	case "node_modules":
+		return true
+	}
+	return false
+}
+
 func main() {
+	cfg := readConfig()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	r := flag.Bool("r", false, "visit folders recursively")
-	h := flag.Bool("h", false, "print help")
-	w := flag.Bool("w", false, "actually write \\r\\n to \\n changes")
-	v := flag.Bool("v", false, "verbose")
-	flag.Parse()
-	if *h || len(flag.Args()) == 0 {
-		name := filepath.Base(os.Args[0])
-		name = strings.TrimSuffix(name, filepath.Ext(name))
-
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "%[1]s <filePattern(s)>       report only in the current folder.\n", name)
-		fmt.Fprintf(flag.CommandLine.Output(), "%[1]s -r <filePattern(s)>    report only in the current folder and recursively.\n", name)
-		fmt.Fprintf(flag.CommandLine.Output(), "%[1]s -w -r <filePattern(s)> replace in the current folder and recursively.\n", name)
-		flag.PrintDefaults()
-		fmt.Fprintf(flag.CommandLine.Output(), "  <filePattern(s)>    file pattern or space-separated list of file patterns, ex. *.tmpl\n")
-		os.Exit(0)
-	}
-
-	for _, s := range flag.Args() {
-		_, err := filepath.Match(s, ".")
-		errs := false
-		if err != nil {
-			fmt.Printf("invalid pattern: %v\n", s)
-			errs = true
-		}
-		if errs {
-			os.Exit(1)
-		}
-	}
-
 	filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
 		if d.IsDir() && path != "." {
-			if !*r {
+			if !cfg.recursive {
 				return fs.SkipDir
 			}
-			switch d.Name() {
-			case ".git":
-				return fs.SkipDir
-			case "node_modules":
+			if skipDir(d.Name()) {
 				return fs.SkipDir
 			}
 		}
@@ -82,7 +67,7 @@ func main() {
 
 			}
 			if process {
-				err := processFile(ctx, path, d, *w, *v)
+				err := processFile(ctx, path, cfg)
 				if err != nil {
 					fmt.Println("-", err)
 				}
@@ -92,22 +77,68 @@ func main() {
 	})
 }
 
-func processFile(ctx context.Context, path string, d fs.DirEntry, write bool, verbose bool) error {
+// readConfig attempts to read flags or exists
+// upon error.
+func readConfig() *config {
+	r := flag.Bool("r", false, "visit folders recursively.")
+	h := flag.Bool("h", false, "print help.")
+	w := flag.Bool("w", false, "actually write \\r\\n to \\n changes.")
+	v := flag.Bool("v", false, "verbose about wrong file types.")
+	flag.Parse()
+	if *h || len(flag.Args()) == 0 {
+		name := filepath.Base(os.Args[0])
+		name = strings.TrimSuffix(name, filepath.Ext(name))
+
+		fmt.Fprintf(flag.CommandLine.Output(), "dos2unix converts line endings from \\r\\n to \\n in text files.\nUsage:\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "%[1]s <filePattern(s)>       report only in the current folder.\n", name)
+		fmt.Fprintf(flag.CommandLine.Output(), "%[1]s -r <filePattern(s)>    report only in the current folder and recursively.\n", name)
+		fmt.Fprintf(flag.CommandLine.Output(), "%[1]s -w -r <filePattern(s)> replace in the current folder and recursively.\n", name)
+		fmt.Fprintf(flag.CommandLine.Output(), "Flags:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(flag.CommandLine.Output(), "  <filePattern(s)>    file pattern or space-separated list of file patterns, ex. *.tmpl\n")
+		os.Exit(0)
+	}
+	for _, s := range flag.Args() {
+		_, err := filepath.Match(s, ".")
+		errs := false
+		if err != nil {
+			fmt.Fprintf(flag.CommandLine.Output(), "Parameter error: invalid pattern: %v\n", s)
+			errs = true
+		}
+		if errs {
+			os.Exit(1)
+		}
+	}
+	return &config{
+		recursive: *r,
+		write:     *w,
+		verbose:   *v,
+	}
+}
+
+// processFile converts the file if cfg.write == true,
+// otherwise simply reports.
+func processFile(ctx context.Context, path string, cfg *config) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("error opening %v: %v", path, err)
 	}
 	defer file.Close()
 
-	temp, err := ioutil.TempFile("", "*.tmp")
-	if err != nil {
-		return fmt.Errorf("unable to create a tmp file: %v", err)
+	var temp *os.File
+	if cfg.write {
+		temp, err = ioutil.TempFile("", "*.tmp")
+		if err != nil {
+			return fmt.Errorf("unable to create a tmp file: %v", err)
+		}
 	}
-	defer func() {
-		//temp.Sync()
-		temp.Close()
-		_ = os.Remove(temp.Name())
-	}()
+	if temp != nil {
+		defer func() {
+			//temp.Sync()
+			temp.Close()
+			_ = os.Remove(temp.Name())
+		}()
+	}
 
 	firstBlock := make([]byte, 512)
 	read, err := file.Read(firstBlock)
@@ -122,7 +153,7 @@ func processFile(ctx context.Context, path string, d fs.DirEntry, write bool, ve
 	if strings.HasPrefix(typeDetected, "text/") {
 		scanner := bufio.NewScanner(file)
 		scanner.Split(scan.ScanLinesKeep)
-		diff := false
+		found := false
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -131,19 +162,24 @@ func processFile(ctx context.Context, path string, d fs.DirEntry, write bool, ve
 			}
 			line := scanner.Text()
 			if strings.HasSuffix(line, "\r\n") {
-				diff = true
+				found = true
 				line = strings.Replace(line, "\r\n", "\n", 1)
 			}
-			_, err := temp.WriteString(strings.Replace(line, "\r\n", "\n", 1))
-			if err != nil {
-				return fmt.Errorf("error writing to temp file %v", err)
+			if temp != nil && found {
+				break // As we only perform scanning, we already know the answer
+			}
+			if temp != nil {
+				_, err := temp.WriteString(strings.Replace(line, "\r\n", "\n", 1))
+				if err != nil {
+					return fmt.Errorf("error writing to temp file %v", err)
+				}
 			}
 		}
 		if err := scanner.Err(); err != nil {
 			return fmt.Errorf("error reading %v: %v", path, err)
 		} else {
-			if diff {
-				if write {
+			if found {
+				if cfg.write {
 					err = file.Close()
 					if err != nil {
 						return fmt.Errorf("can't close original file: %v", err)
@@ -179,13 +215,11 @@ func processFile(ctx context.Context, path string, d fs.DirEntry, write bool, ve
 				} else {
 					fmt.Printf("+ contains \\r\\n:     %v\n", path)
 				}
-			} else {
-				//fmt.Printf("nothing to change: %v\n", path)
 			}
 		}
 	} else {
-		if verbose {
-			fmt.Printf("- wrong file type:   %v (%v)\n", path, typeDetected)
+		if cfg.verbose {
+			return fmt.Errorf("error reading %v: wrong file type %v", path, typeDetected)
 		}
 	}
 	return nil
