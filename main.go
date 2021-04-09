@@ -165,7 +165,7 @@ func processFile(ctx context.Context, path string, cfg *config) error {
 				found = true
 				line = strings.Replace(line, "\r\n", "\n", 1)
 			}
-			if temp != nil && found {
+			if temp == nil && found {
 				break // As we only perform scanning, we already know the answer
 			}
 			if temp != nil {
