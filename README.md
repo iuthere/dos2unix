@@ -1,4 +1,4 @@
-[![github.com/iuthere/dos2unix](./doc/gobadge.svg)](https://pkg.go.dev/github.com/iuthere/dos2unix)
+[![https://github.com/iuthere/dos2unix](./doc/gobadge.svg)](https://pkg.go.dev/github.com/iuthere/dos2unix)
 
 > **Warning**: It's still an experimental tool far from the production ready use. Please use with care. Create backup or use only in VCS-enabled folders. Only tested in Windows.
 
